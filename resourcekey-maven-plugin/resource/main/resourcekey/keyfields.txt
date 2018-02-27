@@ -1,0 +1,2 @@
+/** #{value} */
+public static final #{className} #{name} = new #{className}("#{key}");

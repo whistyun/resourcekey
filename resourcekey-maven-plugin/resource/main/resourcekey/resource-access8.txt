@@ -1,0 +1,72 @@
+private static final String bundleName = "#{bundleName}";
+private static final ConcurrentHashMap<String, Object> bundle = getBundleMap(Locale.getDefault());
+private static final ConcurrentHashMap<Locale, ConcurrentHashMap<String, Object>> bundleCache = new ConcurrentHashMap<>();
+
+private static ConcurrentHashMap<String, Object> getBundleMap(Locale locale) {
+	ConcurrentHashMap<String, Object> map = new ConcurrentHashMap<>();
+
+	ResourceBundle rbundle = ResourceBundle.getBundle(bundleName, locale);
+	for (String key : rbundle.keySet()) {
+		map.put(key, rbundle.getObject(key));
+	}
+
+	return map;
+}
+
+private static ConcurrentHashMap<String, Object> getBundle(Locale locale) {
+	if (locale.equals(Locale.getDefault())) {
+		return bundle;
+	} else if (bundleCache.containsKey(locale)) {
+		return bundleCache.get(locale);
+	} else {
+		return bundleCache.computeIfAbsent(locale, l -> getBundleMap(l));
+	}
+}
+
+protected static Object getObject(String key) {
+	return bundle.get(key);
+}
+
+protected static Object getObject(String key, Locale locale) {
+	return getBundle(locale).get(key);
+}
+
+protected static Object getString(String key) {
+	return (String) getObject(key);
+}
+
+protected static String[] getStringArray(String key) {
+	return (String[]) getObject(key);
+}
+
+protected static Object getString(String key, Locale locale) {
+	return (String) getObject(key, locale);
+}
+
+protected static String[] getStringArray(String key, Locale locale) {
+	return (String[]) getObject(key, locale);
+}
+
+public Object getObject() {
+	return bundle.get(this.key);
+}
+
+public Object getObject(Locale locale) {
+	return getBundle(locale).get(this.key);
+}
+
+public Object getString() {
+	return (String) getObject(this.key);
+}
+
+public String[] getStringArray() {
+	return (String[]) getObject(this.key);
+}
+
+public Object getString(Locale locale) {
+	return (String) getObject(this.key, locale);
+}
+
+public String[] getStringArray(Locale locale) {
+	return (String[]) getObject(this.key, locale);
+}

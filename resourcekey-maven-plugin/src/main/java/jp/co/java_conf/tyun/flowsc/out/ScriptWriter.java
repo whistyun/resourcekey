@@ -5,6 +5,9 @@ import java.io.File;
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -78,11 +81,16 @@ public class ScriptWriter implements ScriptWriterIF<ScriptWriter>, Closeable {
 	 *            パラメータ
 	 */
 	public ScriptWriter block(String sentence) throws IOException {
+		return block(Arrays.asList(sentence.split("\r\n?")));
+	}
+
+	public ScriptWriter block(List<String> lines) throws IOException {
+
 		int indentCnt = 0;
 
 		try {
 			int oldI = 0;
-			for (String line : sentence.split("\r\n|\r|\n")) {
+			for (String line : lines) {
 				// counting whitespace
 				int i;
 				for (i = 0; i < line.length(); ++i) {
@@ -96,12 +104,11 @@ public class ScriptWriter implements ScriptWriterIF<ScriptWriter>, Closeable {
 					dedend();
 					oldI = i;
 				} else if (i > oldI) {
-					indentCnt--;
+					indentCnt++;
 					indend();
 					oldI = i;
 				}
 				w(line.replaceAll("^[ \t\f]+", ""));
-				ln();
 			}
 		} finally {
 			while (indentCnt != 0) {
@@ -122,19 +129,28 @@ public class ScriptWriter implements ScriptWriterIF<ScriptWriter>, Closeable {
 		return namedTemplate(format, param);
 	}
 
-	public ScriptWriter namedTemplate(String namedFormat, Map<String, String> param) throws IOException {
-		Pattern variableHolder = Pattern.compile("{([^}]+)}");
-		StringBuilder builder = new StringBuilder();
+	public ScriptWriter namedTemplate(String namedFormats, Map<String, String> param) throws IOException {
+		Pattern variableHolder = Pattern.compile("#\\{([^\\}]+)\\}");
 
-		int bgn = 0;
-		Matcher matcher = variableHolder.matcher(namedFormat);
-		while (matcher.find(bgn)) {
-			builder.append(namedFormat.substring(bgn, matcher.start()));
-			builder.append(param.get(matcher.group(1)));
-			bgn = matcher.end() + 1;
+		StringBuilder builder = new StringBuilder();
+		List<String> buildTxt = new ArrayList<String>();
+		for (String namedFormat : namedFormats.split("\r\n?")) {
+			int bgn = 0;
+			Matcher matcher = variableHolder.matcher(namedFormat);
+			while (matcher.find(bgn)) {
+				builder.append(namedFormat.substring(bgn, matcher.start()));
+				builder.append(param.get(matcher.group(1)));
+				bgn = matcher.end();
+			}
+			if (bgn < namedFormat.length()) {
+				builder.append(namedFormat.substring(bgn));
+			}
+
+			buildTxt.add(builder.toString());
+			builder.setLength(0);
 		}
 
-		block(builder.toString());
+		block(buildTxt);
 
 		return this;
 	}
@@ -158,7 +174,7 @@ public class ScriptWriter implements ScriptWriterIF<ScriptWriter>, Closeable {
 	}
 
 	private String dedendText(String text) {
-		return text.substring(0, text.length() - 2);
+		return text.substring(0, text.length() - theTab.length());
 	}
 
 	private class Tab implements ScriptWriterIF<Tab> {

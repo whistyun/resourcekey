@@ -14,6 +14,8 @@ import org.apache.maven.model.Resource;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.MojoFailureException;
+import org.apache.maven.plugin.logging.Log;
+import org.apache.maven.plugins.annotations.Execute;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
@@ -21,7 +23,8 @@ import org.apache.maven.plugins.annotations.Parameter;
 /**
  * Goal which touches a timestamp file.
  */
-@Mojo(name = "propertykey", defaultPhase = LifecyclePhase.GENERATE_SOURCES)
+@Mojo(name = "resourcekey", defaultPhase = LifecyclePhase.GENERATE_SOURCES)
+@Execute(goal = "resourcekey", phase = LifecyclePhase.GENERATE_SOURCES)
 public class MyMojo extends AbstractMojo {
 
 	////////////////////////////////////////////////////////////////////////////////
@@ -42,6 +45,9 @@ public class MyMojo extends AbstractMojo {
 
 	@Parameter(defaultValue = "${project.groupId}.${project.artifactId}", readonly = true, required = true)
 	private String defaultOutputPackage;
+
+	@Parameter(defaultValue = "${maven.compiler.target}", readonly = true, required = true)
+	public String version;
 
 	/** the package for organizing generated class */
 	@Parameter(property = "outputPackage")
@@ -87,6 +93,14 @@ public class MyMojo extends AbstractMojo {
 		this.defaultOutputPackage = defaultOutputPackage;
 	}
 
+	public String getVersion() {
+		return version;
+	}
+
+	public void setVersion(String version) {
+		this.version = version;
+	}
+
 	public String getOutputPackage() {
 		return outputPackage;
 	}
@@ -122,26 +136,29 @@ public class MyMojo extends AbstractMojo {
 	private ClassLoader resourceDirectoriesClassLoader;
 
 	public void execute() throws MojoExecutionException, MojoFailureException {
-		// compute parameter from maven's
-		computePackageStr();
-		computeSourceOutputDirectory();
-		computeResourceDirectoriesClassLoader();
+		try {
+			// compute parameter from maven's
+			computePackageStr();
+			computeSourceOutputDirectory();
+			computeResourceDirectoriesClassLoader();
 
-		// source generate
-		ClassLoader propertyDistDir = getResourceDirectoriesClassLoader();
-		for (String resource : getProperties()) {
-			ResourceBundle bundle = ResourceBundle.getBundle(resource, Locale.getDefault(), propertyDistDir);
-			String className = propertyFileToClassName(bundle.getBaseBundleName());
-			if (bundle == null) {
-				getLog().warn(String.format("property (%s) is not found", resource));
-			}
+			// source generate
+			ClassLoader propertyDistDir = getResourceDirectoriesClassLoader();
+			for (String resource : getProperties()) {
+				ResourceBundle bundle = ResourceBundle.getBundle(resource, Locale.getDefault(), propertyDistDir);
+				if (bundle == null) {
+					getLog().warn(String.format("property (%s) is not found", resource));
+				}
 
-			PropertyClassMaker classMaker = new PropertyClassMaker(this, bundle, className);
-			try {
-				classMaker.write();
-			} catch (IOException e) {
-				throw new MojoExecutionException("output error", e);
+				PropertyClassMaker classMaker = new PropertyClassMaker(this, bundle);
+				try {
+					classMaker.write();
+				} catch (IOException e) {
+					throw new MojoExecutionException("output error", e);
+				}
 			}
+		} catch (RuntimeException e) {
+			throw new MojoExecutionException("unexpected exxception", e);
 		}
 	}
 
@@ -162,13 +179,20 @@ public class MyMojo extends AbstractMojo {
 			f = new File(f, pack);
 		}
 		sourceOutputDirectory = f;
+
+		if (!sourceOutputDirectory.isDirectory()) {
+			sourceOutputDirectory.mkdirs();
+		}
 	}
 
 	public void computeResourceDirectoriesClassLoader() {
 		List<URL> list = new ArrayList<URL>();
 
+		Log logger = getLog();
+
 		for (Resource res : getResources()) {
-			File resourceFile = new File(getBaseDir(), res.getDirectory());
+			File resourceFile = new File(res.getDirectory());
+			logger.debug("load " + resourceFile.getAbsolutePath());
 			try {
 				list.add(resourceFile.toURI().toURL());
 			} catch (MalformedURLException e) {
@@ -177,6 +201,7 @@ public class MyMojo extends AbstractMojo {
 		}
 
 		File sourceDir = getSourceDirectory();
+		logger.debug("load " + sourceDir.getAbsolutePath());
 		try {
 			list.add(sourceDir.toURI().toURL());
 		} catch (MalformedURLException e) {
@@ -184,40 +209,6 @@ public class MyMojo extends AbstractMojo {
 		}
 
 		resourceDirectoriesClassLoader = new URLClassLoader(list.toArray(new URL[list.size()]));
-	}
-
-	private String propertyFileToClassName(String bundleBasename) {
-		String propName;
-		if (bundleBasename.lastIndexOf('.') != -1) {
-			propName = bundleBasename.substring(0, bundleBasename.lastIndexOf('.'));
-		} else {
-			propName = bundleBasename;
-		}
-
-		StringBuilder builder = new StringBuilder();
-		for (int idx = 0; idx < propName.length();) {
-			int codePoint = propName.codePointAt(idx);
-			idx += ((codePoint & 0xFFFF0000) == 0) ? 1 : 2;
-
-			boolean accept;
-			if (builder.length() == 0) {
-				accept = Character.isJavaIdentifierStart(codePoint);
-			} else {
-				accept = Character.isJavaIdentifierPart(codePoint);
-			}
-
-			if (accept) {
-				builder.appendCodePoint(codePoint);
-			} else if (codePoint == '-') {
-				builder.append('_');
-			}
-		}
-
-		if (builder.length() == 0) {
-			getLog().warn(String.format("property file (%s) can not convert to java class name", propName));
-		}
-
-		return builder.toString();
 	}
 
 	public File getSourceOutputDirectory() {

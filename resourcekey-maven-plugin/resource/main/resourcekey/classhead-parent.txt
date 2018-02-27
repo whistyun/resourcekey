@@ -1,0 +1,7 @@
+package #{sourcePackage};
+
+import java.util.Locale;
+import java.util.ResourceBundle;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class #{className} {

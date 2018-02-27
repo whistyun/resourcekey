@@ -1,0 +1,6 @@
+private String key;
+
+private #{className}(String key){
+	this.key = key;
+}
+

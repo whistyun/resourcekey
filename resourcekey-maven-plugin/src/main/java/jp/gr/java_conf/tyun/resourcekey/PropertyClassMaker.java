@@ -1,10 +1,8 @@
 package jp.gr.java_conf.tyun.resourcekey;
 
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.ResourceBundle;
@@ -18,6 +16,7 @@ import jp.co.java_conf.tyun.flowsc.out.ScriptWriter;
 public class PropertyClassMaker {
 	private Log logger;
 
+	private String outputJavaVersion;
 	private Charset encoding;
 	private File sourceOutputDirectory;
 	private String sourcePackage;
@@ -26,13 +25,17 @@ public class PropertyClassMaker {
 
 	private Grouping root;
 
-	public PropertyClassMaker(MyMojo mojo, ResourceBundle bundle, String outputClassName) {
+	public PropertyClassMaker(MyMojo mojo, ResourceBundle bundle) {
 		this.logger = mojo.getLog();
+		this.outputJavaVersion = mojo.getVersion();
 		this.encoding = Charset.forName(mojo.getEncoding());
 		this.sourceOutputDirectory = mojo.getSourceOutputDirectory();
 		this.sourcePackage = mojo.getPackageStr();
-		this.outputClassName = outputClassName;
 		this.targetBundle = bundle;
+
+		String bundleBaseName = bundle.getBaseBundleName();
+		int li = bundleBaseName.lastIndexOf('.');
+		this.outputClassName = propertyFileToClassName(li == -1 ? bundleBaseName : bundleBaseName.substring(li + 1));
 
 		this.root = new Grouping(this.outputClassName);
 		for (String key : targetBundle.keySet()) {
@@ -48,35 +51,95 @@ public class PropertyClassMaker {
 	public void write() throws IOException {
 		File outputFile = new File(sourceOutputDirectory, outputClassName + ".java");
 
+		logger.info(String.format("output class '%s' to %s", outputClassName, outputFile.getAbsolutePath()));
+
 		ScriptWriter writer = null;
 		try {
 			writer = new ScriptWriter(outputFile, encoding);
 
-			writer.w("package %s", sourcePackage);
+			// ソースの開始部分
+			Map<String, String> parameter = new HashMap<String, String>();
+			parameter.put("sourcePackage", sourcePackage);
+			parameter.put("className", root.className);
+			writer.namedTemplateClasspath("/resourcekey/classhead-parent.txt", parameter);
+			writer.indend();
+
+			// 決まりきったプロパティ
+			writeForField(writer, root.className, root);
+
+			// コンストラクタ
+			parameter.clear();
+			parameter.put("className", root.className);
+			writer.namedTemplateClasspath("/resourcekey/constructor-parent.txt", parameter);
 			writer.ln();
 
-			Grouping group = root;
-			write(writer, group);
+			// 内部クラス
+			writeForDerived(writer, root.className, root);
+
+			// 固定ロジック
+			parameter.clear();
+			parameter.put("bundleName", targetBundle.getBaseBundleName());
+
+			if (isElderJavaVersion(this.outputJavaVersion)) {
+				// ~java1.7
+				writer.namedTemplateClasspath("/resourcekey/resource-access7.txt", parameter);
+			} else {
+				// java1.8~
+				writer.namedTemplateClasspath("/resourcekey/resource-access8.txt", parameter);
+			}
+			writer.ln();
+
+			writer.dedend();
+			writer.w("}");
 
 		} finally {
 			IOUtil.closeChain(writer);
 		}
 	}
 
-	private void write(ScriptWriter writer, Grouping group) throws IOException {
-		writer.w("public enum %s {", group.className);
+	private boolean isElderJavaVersion(String versionLabel) {
+		try {
+			double version = Double.parseDouble(versionLabel);
+			return version < 1.8;
+		} catch (NumberFormatException e) {
+			return false;
+		}
+	}
+
+	private void writeForField(ScriptWriter writer, String className, Grouping group) throws IOException {
 		for (Map.Entry<String, GrpuingEntry> nkv : group.name2Val.entrySet()) {
 			Map<String, String> parameter = new HashMap<String, String>();
+			parameter.put("className", className);
 			parameter.put("name", nkv.getValue().getName());
 			parameter.put("key", nkv.getValue().getKey());
 			parameter.put("value", nkv.getValue().getValue());
-			writer.namedTemplateClasspath("resourcekey/enum-element.txt", parameter);
+			writer.namedTemplateClasspath("/resourcekey/keyfields.txt", parameter);
 		}
 		writer.ln();
-		for (Map.Entry<String, Grouping> subGroup : group.keyAndGrouping.entrySet()) {
-			write(writer, subGroup.getValue());
+	}
+
+	private void writeForDerived(ScriptWriter writer, String className, Grouping parentGroup) throws IOException {
+		String parentClass = parentGroup.className;
+
+		for (Map.Entry<String, Grouping> groupEntry : parentGroup.keyAndGrouping.entrySet()) {
+			Grouping group = groupEntry.getValue();
+
+			// クラス名(始まり)
+			logger.debug(String.format("create derived class '%s'", group.className));
+			writer.w("public static class %s {", group.className);
+			writer.indend();
+
+			// 決まりきったプロパティ
+			writeForField(writer, className, group);
+
+			// サブクラス
+			writeForDerived(writer, className, group);
+
+			// クラス名(終わり)
+			writer.dedend();
+			writer.w("}");
 		}
-		writer.w("}");
+
 	}
 
 	private static class Grouping {
